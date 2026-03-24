@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantt Pro | Editor Interactivo</title>
+
+<style>
+:root {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --border: #e2e8f0;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --selection: #f1f5f9;
+  --accent: #3b82f6;
+}
+
+* { box-sizing: border-box; transition: all 0.1s ease; }
+body { 
+  font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+  margin: 0; padding: 40px 20px; 
+  background: var(--bg); color: var(--text-main); 
+}
+
+.wrap { max-width: 1200px; margin: 0 auto; }
+
+/* Header & Branding */
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
+h1 { font-size: 24px; font-weight: 800; margin: 0; color: var(--text-main); letter-spacing: -0.5px; }
+.badge { background: var(--selection); padding: 4px 12px; border-radius: 20px; font-size: 12px; color: var(--primary); font-weight: 600; }
+
+/* Toolbar */
+.toolbar { 
+  display: flex; gap: 10px; background: var(--panel); 
+  padding: 12px; border-radius: 12px; border: 1px solid var(--border);
+  margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+  overflow-x: auto;
+}
+button {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border: 1px solid var(--border);
+  background: white; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+button:hover { background: var(--selection); border-color: var(--text-muted); }
+button.primary { background: var(--primary); color: white; border: none; }
+button.primary:hover { background: var(--primary-hover); }
+button.danger { color: #ef4444; }
+button.danger:hover { background: #fef2f2; border-color: #fca5a5; }
+.sep { width: 1px; height: 24px; background: var(--border); margin: 0 5px; }
+
+/* Table Style */
+.tablebox {
+  background: var(--panel); border-radius: 12px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05);
+}
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th, td { border: 1px solid var(--border); padding: 0; height: 45px; position: relative; }
+
+/* Cells */
+th { background: #fcfcfd; font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+td:first-child, th:first-child { width: 250px; text-align: left; padding: 0 15px; font-size: 14px; }
+td { cursor: crosshair; user-select: none; }
+
+/* States */
+.active-row td { background: var(--selection); }
+.active-col { background: #f8fafc !important; }
+.ocupado {
+  position: absolute; inset: 6px;
+  background: var(--accent); border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+  pointer-events: none; /* Crucial para drag */
+}
+
+/* Tooltip & Hints */
+.hint { margin-top: 20px; color: var(--text-muted); font-size: 13px; display: flex; gap: 20px; }
+.hint span { display: flex; align-items: center; gap: 5px; }
+kbd { background: white; border: 1px solid var(--border); padding: 2px 5px; border-radius: 4px; font-size: 11px; }
+
+[contenteditable]:focus { outline: 2px solid var(--primary); background: white; }
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>Diagrama de Gantt <span class="badge">v2.0</span></h1>
+  </div>
+
+  <div class="toolbar">
+    <button onclick="addRow()" class="primary">+ Añadir Tarea</button>
+    <button onclick="addCol()">+ Añadir Semana</button>
+    <span class="sep"></span>
+    <button onclick="deleteActiveRow()" class="danger">Eliminar Tarea Activa</button>
+    <button onclick="deleteActiveCol()" class="danger">Eliminar Semana Activa</button>
+    <span class="sep"></span>
+    <button onclick="downloadHTML()">💾 Descargar HTML</button>
+    <button onclick="clearStorage()" style="margin-left:auto">🧹 Limpiar Todo</button>
+  </div>
+
+  <div class="tablebox">
+    <table id="gantt">
+      <thead>
+        <tr id="header-row">
+          <th>Tarea</th>
+          <th contenteditable="true">Semana 1</th>
+          <th contenteditable="true">Semana 2</th>
+          <th contenteditable="true">Semana 3</th>
+          <th contenteditable="true">Semana 4</th>
+        </tr>
+      </thead>
+      <tbody id="gantt-body">
+        </tbody>
+    </table>
+  </div>
+
+  <div class="hint">
+    <span>🖱️ <b>Click y arrastra</b> para pintar varias celdas</span>
+    <span>✏️ Haz click en los textos para editarlos</span>
+    <span>💾 Se guarda automáticamente en tu navegador</span>
+  </div>
+</div>
+
+<script>
+const table = document.getElementById("gantt");
+const tbody = document.getElementById("gantt-body");
+const theadRow = document.getElementById("header-row");
+
+let isMouseDown = false;
+let activeRowIndex = -1;
+let activeColIndex = -1;
+
+// === Inicialización ===
+window.onload = () => {
+    const saved = localStorage.getItem('ganttData');
+    if (saved) {
+        loadData(JSON.parse(saved));
+    } else {
+        // Datos iniciales si está vacío
+        for(let i=0; i<3; i++) addRow(`Tarea ${i+1}`);
+    }
+};
+
+// === Lógica de Pintado (Drag & Click) ===
+table.onmousedown = (e) => {
+    if (e.target.tagName === 'TD' && e.target.cellIndex > 0) {
+        isMouseDown = true;
+        toggleCell(e.target);
+    }
+};
+
+table.onmouseover = (e) => {
+    if (isMouseDown && e.target.tagName === 'TD' && e.target.cellIndex > 0) {
+        toggleCell(e.target);
+    }
+};
+
+window.onmouseup = () => isMouseDown = false;
+
+function toggleCell(td) {
+    const hasBlock = td.querySelector('.ocupado');
+    if (hasBlock) {
+        hasBlock.remove();
+    } else {
+        const div = document.createElement('div');
+        div.className = 'ocupado';
+        td.appendChild(div);
+    }
+    saveData();
+}
+
+// === Selección de Fila/Columna ===
+table.onclick = (e) => {
+    const cell = e.target.closest('td, th');
+    if (!cell) return;
+
+    // Reset
+    document.querySelectorAll('.active-row').forEach(r => r.classList.remove('active-row'));
+    document.querySelectorAll('.active-col').forEach(c => c.classList.remove('active-col'));
+
+    activeColIndex = cell.cellIndex;
+    activeRowIndex = cell.parentElement.rowIndex - 1;
+
+    // Activar fila
+    if (activeRowIndex >= 0) {
+        tbody.rows[activeRowIndex].classList.add('active-row');
+    }
+
+    // Activar columna
+    if (activeColIndex > 0) {
+        Array.from(table.rows).forEach(row => {
+            row.cells[activeColIndex].classList.add('active-col');
+        });
+    }
+};
+
+// === Acciones de Estructura ===
+function addRow(name = "Nueva Tarea") {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td contenteditable="true">${name}</td>` + 
+                   `<td></td>`.repeat(theadRow.cells.length - 1);
+    tbody.appendChild(tr);
+    saveData();
+}
+
+function addCol() {
+    const n = theadRow.cells.length;
+    const th = document.createElement('th');
+    th.contentEditable = "true";
+    th.textContent = `Semana ${n}`;
+    theadRow.appendChild(th);
+
+    Array.from(tbody.rows).forEach(row => row.insertCell(-1));
+    saveData();
+}
+
+function deleteActiveRow() {
+    if (activeRowIndex >= 0 && tbody.rows.length > 1) {
+        tbody.deleteRow(activeRowIndex);
+        activeRowIndex = -1;
+        saveData();
+    }
+}
+
+function deleteActiveCol() {
+    if (activeColIndex > 0 && theadRow.cells.length > 2) {
+        Array.from(table.rows).forEach(row => row.deleteCell(activeColIndex));
+        activeColIndex = -1;
+        saveData();
+    }
+}
+
+// === Persistencia (Local Storage) ===
+function saveData() {
+    const data = {
+        headers: Array.from(theadRow.cells).map(c => c.textContent),
+        rows: Array.from(tbody.rows).map(row => ({
+            name: row.cells[0].textContent,
+            blocks: Array.from(row.cells).slice(1).map(c => c.innerHTML !== "")
+        }))
+    };
+    localStorage.setItem('ganttData', JSON.stringify(data));
+}
+
+function loadData(data) {
+    theadRow.innerHTML = data.headers.map((h, i) => 
+        `<th ${i==0?'':'contenteditable="true"'}>${h}</th>`).join('');
+    
+    tbody.innerHTML = "";
+    data.rows.forEach(r => {
+        const tr = document.createElement('tr');
+        let cellsHtml = `<td contenteditable="true">${r.name}</td>`;
+        r.blocks.forEach(isFull => {
+            cellsHtml += `<td>${isFull ? '<div class="ocupado"></div>' : ''}</td>`;
+        });
+        tr.innerHTML = cellsHtml;
+        tbody.appendChild(tr);
+    });
+}
+
+function clearStorage() {
+    if(confirm("¿Borrar todo el diagrama?")) {
+        localStorage.removeItem('ganttData');
+        location.reload();
+    }
+}
+
+// Escuchar cambios en textos para guardar
+table.oninput = () => saveData();
+
+// === Exportación ===
+function downloadHTML() {
+    const html = "<!doctype html>\n" + document.documentElement.outerHTML;
+    const blob = new Blob([html], {type:"text/html"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "mi-gantt-pro.html";
+    a.click();
+}
+</script>
+</body>
+</html>
